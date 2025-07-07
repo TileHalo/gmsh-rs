@@ -1,0 +1,12 @@
+[package]
+name = "sys-gmsh"
+version = "0.1.0"
+edition = "2024"
+authors = ["Leo Lahti leo.lahti1@gmail.com"]
+description = "Bindings for the GMSH C library"
+repository = "https://github.com/TileHalo/gmsh-rs"
+
+license = "GPL-2.0-or-later"
+
+[build-dependencies]
+bindgen = "0.72.0"
