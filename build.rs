@@ -1,36 +1,52 @@
+// Build script taken and modernized from https://github.com/mxxo/gmsh-sys
+
 use std::env;
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
 
 fn main() {
-    // Tell cargo to look for shared libraries in the specified directory
+    // 1. environment variable takes first priority
+    let env_gmsh = "GMSH_LIB_DIR";
+    if let Some(lib_dir) = env::var_os(env_gmsh) {
+        // rerun if changed
+        println!("cargo:rerun-if-env-changed={env_gmsh}");
 
-    let pth = Command::new("gcc").args(["--print-file-name=libgmsh.so"]).output().expect("kele");
-    let pth_s = String::from_utf8(pth.stdout).unwrap();
-    println!("cargo:rustc-link-search={pth_s}");
+        let lib_dir = Path::new(&lib_dir);
+        let dylib_name = format!("{}gmsh{}", env::consts::DLL_PREFIX, env::consts::DLL_SUFFIX);
+        if lib_dir.join(dylib_name).exists() || lib_dir.join("gmsh.lib").exists() {
+            println!("cargo:rustc-link-search={}", lib_dir.display());
+            // blocked on https://github.com/rust-lang/cargo/issues/4895
+            // println!("cargo:rustc-dynamic-link-search={}", lib_dir.display())
+        } else {
+            println!(
+                "cargo:warning={env_gmsh} is set to {lib_dir:?}, but no shared library files were found there"
+            );
+        }
+    }
+    // 2. search system libraries
+    //    -- try pkg-config on linux
+    else {
+        match try_pkgconfig() {
+            Ok(link_paths) => {
+                for path in link_paths.into_iter() {
+                    println!("cargo:rustc-link-search={}", path.display());
+                }
+            }
+            Err(not_found) => {
+                eprintln!("pkg-config couldn't find Gmsh library {not_found}, ",)
+            }
+        }
+    }
 
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
+    // always link the gmsh shared library at the end
     println!("cargo:rustc-link-lib=gmsh");
+}
 
-    // The bindgen::Builder is the main entry point
-    // to bindgen, and lets you build up options for
-    // the resulting bindings.
-    let bindings = bindgen::Builder::default()
-        // The input header we would like to generate
-        // bindings for.
-        .header("wrapper.h")
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        // Finish the builder and generate the bindings.
-        .generate()
-        // Unwrap the Result and panic on failure.
-        .expect("Unable to generate bindings");
+fn try_pkgconfig() -> Result<Vec<PathBuf>, String> {
+    let mut pkg = pkg_config::Config::new();
+    pkg.atleast_version("4.4");
 
-    // Write the bindings to the $OUT_DIR/bindings.rs file.
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
+    match pkg.probe("gmsh") {
+        Ok(gmsh_lib) => Ok(gmsh_lib.link_paths), // println!("found it"); true},
+        Err(err) => Err(err.to_string()), // println!("cargo:warning={}, shared Gmsh library wasn't found. false},
+    }
 }
